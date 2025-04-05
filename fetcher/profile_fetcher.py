@@ -1,18 +1,18 @@
 import time
 import random
 import logging
-import json
 from utils import HttpConfig
 from fetcher.base_fetcher import BaseFetcher
 from config import Config
+from db import Database
 
 logger = logging.getLogger(__name__)
 
 class ProfileFetcher(BaseFetcher):
-    def __init__(self, auth_manager, filename=None):
-        filename = filename or Config.BATCH_FILE
-        super().__init__(auth_manager, filename)
+    def __init__(self, auth_manager):
+        super().__init__(auth_manager)
         self.base_url = f"{HttpConfig.BASE_URL}/rest/v2/user/info/profile"
+        self.db = Database()
 
     def fetch_profile(self, hid):
         headers = self.get_headers({
@@ -49,23 +49,21 @@ class ProfileFetcher(BaseFetcher):
         return None
 
     def process_batch_items(self):
-        batch_data = self.load_from_file([])
+        users = self.db.get_users_without_profile(limit=50)
         processed_count = 0
         
-        for item in batch_data:
-            hid = item.get("user", {}).get("hid")
-            if not hid or "profile_detailed" in item:
-                continue
-                
+        for hid, user_data in users:
             profile = self.fetch_profile(hid)
             if profile:
-                item["profile_detailed"] = profile
-                processed_count += 1
-                self.save_to_file(batch_data)
+                if self.db.save_user_profile(hid, profile):
+                    processed_count += 1
             
             time.sleep(random.uniform(Config.PROFILE_FETCH_DELAY_MIN, Config.PROFILE_FETCH_DELAY_MAX))
         
         logger.info("Processed %d new profiles", processed_count)
+        total_with_profile = self.db.count_users_with_profile()
+        total_users = self.db.count_users()
+        logger.info(f"Progress: {total_with_profile}/{total_users} profiles fetched")
         return processed_count
 
     def continuous_fetch(self):

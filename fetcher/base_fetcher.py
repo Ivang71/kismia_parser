@@ -1,4 +1,3 @@
-import json
 import logging
 import requests
 import time
@@ -8,9 +7,8 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 class BaseFetcher:
-    def __init__(self, auth_manager, filename):
+    def __init__(self, auth_manager):
         self.auth_manager = auth_manager
-        self.filename = filename
         self.cookies = HttpConfig.get_common_cookies()
         
     def get_headers(self, additional_headers=None):
@@ -42,20 +40,4 @@ class BaseFetcher:
                 if retries >= Config.MAX_RETRIES:
                     logger.error(f"Max retries reached for request to {url}")
                     raise
-                time.sleep(Config.RETRY_DELAY)
-        
-    def save_to_file(self, data):
-        try:
-            with open(self.filename, "w") as f:
-                json.dump(data, f, indent=4)
-            logger.info("Data saved to %s", self.filename)
-        except Exception as e:
-            logger.error("Failed to save data to %s: %s", self.filename, e)
-        
-    def load_from_file(self, default=None):
-        try:
-            with open(self.filename, "r") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            logger.info("No existing file found or file is empty: %s", self.filename)
-            return default or [] 
+                time.sleep(Config.RETRY_DELAY) 

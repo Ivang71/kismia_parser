@@ -4,24 +4,17 @@ import logging
 from utils import HttpConfig
 from fetcher.base_fetcher import BaseFetcher
 from config import Config
+from db import Database
 
 logger = logging.getLogger(__name__)
 
 class BatchFetcher(BaseFetcher):
-    def __init__(self, auth_manager, max_pages=None, filename=None):
-        filename = filename or Config.BATCH_FILE
-        super().__init__(auth_manager, filename)
+    def __init__(self, auth_manager, max_pages=None):
+        super().__init__(auth_manager)
         self.base_url = f"{HttpConfig.BASE_URL}/v3/matchesGame/users:pickUp"
         self.max_pages = max_pages or Config.HIDS_FETCH_MAX_PAGES
-        self.items = []
         self.next_page_token = None
-        self.load_existing_items()
-
-    def load_existing_items(self):
-        self.items = self.load_from_file()
-
-    def dump_items(self):
-        self.save_to_file(self.items)
+        self.db = Database()
 
     def fetch(self):
         for page in range(self.max_pages):
@@ -38,16 +31,14 @@ class BatchFetcher(BaseFetcher):
 
                 data = resp.json()
                 hits = data.get("hits", [])
-                items_count_before = len(self.items)
+                saved_count = 0
+                
                 for hit in hits:
-                    hid = hit.get("user", {}).get("hid")
-                    if hid and not any(item.get("user", {}).get("hid") == hid for item in self.items):
-                        self.items.append(hit)
+                    if self.db.save_user(hit):
+                        saved_count += 1
                         
-                new_items_added = len(self.items) > items_count_before
-                if new_items_added:
-                    logger.info("Added %d new items", len(self.items) - items_count_before)
-                    self.dump_items()
+                if saved_count > 0:
+                    logger.info("Added %d new items", saved_count)
                     
                 logger.info("Page %d processed", page + 1)
 
@@ -61,8 +52,7 @@ class BatchFetcher(BaseFetcher):
                 continue
 
             time.sleep(random.uniform(Config.HIDS_PAGE_DELAY_MIN, Config.HIDS_PAGE_DELAY_MAX))
-            
-        if not any(new_items_added for _ in range(self.max_pages)) and self.items:
-            self.dump_items()
-            
-        return self.items
+        
+        total_users = self.db.count_users()
+        logger.info(f"Total users in database: {total_users}")
+        return total_users

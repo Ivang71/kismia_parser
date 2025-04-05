@@ -11,6 +11,7 @@ class Config:
     DATA_DIR = os.path.dirname(os.path.abspath(__file__))
     TOKEN_FILE = os.path.join(DATA_DIR, "auth_token.json")
     BATCH_FILE = os.path.join(DATA_DIR, "data.json")
+    DB_FILE = os.path.join(DATA_DIR, "kismia.db")
     
     REQUEST_TIMEOUT = 30
     MAX_RETRIES = 3
