@@ -50,15 +50,12 @@ class ProfileFetcher:
         logger.info("Profiles dumped to %s", self.filename)
 
     def fetch_profiles(self, hids):
-        # You can group hids to reduce number of requests if needed.
-        # For simplicity, we'll assume one request per hid.
         for hid in hids:
             headers = self.update_headers()
             if headers is None:
                 logger.error("Skipping profile fetch due to missing headers.")
                 continue
 
-            # The endpoint expects a query parameter: users_hids[]=<hid>
             params = {
                 "data_group": "profile",
                 "users_hids[]": hid
@@ -69,7 +66,6 @@ class ProfileFetcher:
                     logger.error("Profile fetch failed for hid %s with status: %d", hid, resp.status_code)
                     continue
                 data = resp.json()
-                # Assume the profile is under the "result" key as a list.
                 if "result" in data and data["result"]:
                     self.profiles.append(data["result"][0])
                     logger.info("Fetched profile for hid %s", hid)
@@ -77,7 +73,6 @@ class ProfileFetcher:
                     logger.warning("No profile data for hid %s", hid)
             except Exception as e:
                 logger.error("Exception while fetching profile for hid %s: %s", hid, e)
-            # Respect rate limits.
             time.sleep(random.uniform(1, 3))
         self.dump_profiles()
         return self.profiles

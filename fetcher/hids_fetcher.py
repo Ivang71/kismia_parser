@@ -17,7 +17,7 @@ class HidsFetcher:
             "funnel_id": "67e91fc11b3915.24228280",
             "landing_user": "1743331265111"
         }
-        self.hids = []    # To store hids
+        self.hids = []
         self.next_page_token = None
         self.load_existing_hids()
 
@@ -95,7 +95,6 @@ class HidsFetcher:
 
             time.sleep(random.uniform(7, 13))
             
-        # Final check in case no new HIDs were found but we still want to ensure file exists
         if not any(new_hids_added for _ in range(self.max_pages)) and self.hids:
             self.dump_hids()
             
