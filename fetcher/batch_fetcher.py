@@ -7,21 +7,21 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-class HidsFetcher(BaseFetcher):
+class BatchFetcher(BaseFetcher):
     def __init__(self, auth_manager, max_pages=None, filename=None):
-        filename = filename or Config.HIDS_FILE
+        filename = filename or Config.BATCH_FILE
         super().__init__(auth_manager, filename)
         self.base_url = f"{HttpConfig.BASE_URL}/v3/matchesGame/users:pickUp"
         self.max_pages = max_pages or Config.HIDS_FETCH_MAX_PAGES
-        self.hids = []
+        self.items = []
         self.next_page_token = None
-        self.load_existing_hids()
+        self.load_existing_items()
 
-    def load_existing_hids(self):
-        self.hids = self.load_from_file()
+    def load_existing_items(self):
+        self.items = self.load_from_file()
 
-    def dump_hids(self):
-        self.save_to_file(self.hids)
+    def dump_items(self):
+        self.save_to_file(self.items)
 
     def fetch(self):
         for page in range(self.max_pages):
@@ -38,16 +38,16 @@ class HidsFetcher(BaseFetcher):
 
                 data = resp.json()
                 hits = data.get("hits", [])
-                hids_count_before = len(self.hids)
+                items_count_before = len(self.items)
                 for hit in hits:
                     hid = hit.get("user", {}).get("hid")
-                    if hid and not any(h.get("id") == hid for h in self.hids):
-                        self.hids.append({"id": hid, "processed": False})
+                    if hid and not any(item.get("user", {}).get("hid") == hid for item in self.items):
+                        self.items.append(hit)
                         
-                new_hids_added = len(self.hids) > hids_count_before
-                if new_hids_added:
-                    logger.info("Added %d new HIDs", len(self.hids) - hids_count_before)
-                    self.dump_hids()
+                new_items_added = len(self.items) > items_count_before
+                if new_items_added:
+                    logger.info("Added %d new items", len(self.items) - items_count_before)
+                    self.dump_items()
                     
                 logger.info("Page %d processed", page + 1)
 
@@ -56,13 +56,13 @@ class HidsFetcher(BaseFetcher):
                     logger.info("No nextPageToken found; ending pagination.")
                     break
             except Exception as e:
-                logger.error("Error fetching hids: %s", e)
+                logger.error("Error fetching items: %s", e)
                 time.sleep(Config.RETRY_DELAY)
                 continue
 
             time.sleep(random.uniform(Config.HIDS_PAGE_DELAY_MIN, Config.HIDS_PAGE_DELAY_MAX))
             
-        if not any(new_hids_added for _ in range(self.max_pages)) and self.hids:
-            self.dump_hids()
+        if not any(new_items_added for _ in range(self.max_pages)) and self.items:
+            self.dump_items()
             
-        return self.hids
+        return self.items
