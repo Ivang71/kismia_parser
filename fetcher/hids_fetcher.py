@@ -19,6 +19,16 @@ class HidsFetcher:
         }
         self.hids = []    # To store hids
         self.next_page_token = None
+        self.load_existing_hids()
+
+    def load_existing_hids(self):
+        try:
+            with open(self.filename, "r") as f:
+                self.hids = json.load(f)
+            logger.info("Loaded %d existing HIDs from %s", len(self.hids), self.filename)
+        except (FileNotFoundError, json.JSONDecodeError):
+            logger.info("No existing HIDs file found or file is empty. Starting fresh.")
+            self.hids = []
 
     def dump_hids(self):
         with open(self.filename, "w") as f:
@@ -65,12 +75,17 @@ class HidsFetcher:
 
             data = resp.json()
             hits = data.get("hits", [])
+            hids_count_before = len(self.hids)
             for hit in hits:
                 hid = hit.get("user", {}).get("hid")
                 if hid and hid not in self.hids:
                     self.hids.append(hid)
-
-            self.dump_hids()
+                    
+            new_hids_added = len(self.hids) > hids_count_before
+            if new_hids_added:
+                logger.info("Added %d new HIDs", len(self.hids) - hids_count_before)
+                self.dump_hids()
+                
             logger.info("Page %d processed", page + 1)
 
             self.next_page_token = data.get("nextPageToken")
@@ -79,4 +94,9 @@ class HidsFetcher:
                 break
 
             time.sleep(random.uniform(7, 13))
+            
+        # Final check in case no new HIDs were found but we still want to ensure file exists
+        if not any(new_hids_added for _ in range(self.max_pages)) and self.hids:
+            self.dump_hids()
+            
         return self.hids
