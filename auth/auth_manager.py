@@ -3,15 +3,17 @@ import json
 import time
 import logging
 import requests
+from requests.exceptions import RequestException
 import jwt
+from utils import HttpConfig
+from config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AuthManager:
-    TOKEN_FILE = "auth_token.json"
-    REFRESH_ENDPOINT = "https://m.kismia.com/rest/v2/login/refresh_token"
-    USER_AGENT = "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36"
+    TOKEN_FILE = Config.TOKEN_FILE
+    REFRESH_ENDPOINT = f"{HttpConfig.BASE_URL}/rest/v2/login/refresh_token"
     
     def __init__(self):
         self.token_data = {}
@@ -64,34 +66,44 @@ class AuthManager:
             "refresh_token": self.token_data["refreshToken"].get("refresh_token"),
             "access_token": self.token_data["accessToken"].get("access_token")
         }
-        headers = {
-            "accept": "application/json, text/plain, */*",
-            "content-type": "application/json",
-            "user-agent": self.USER_AGENT,
-            "platform": "mobile",
-            "platform-version": "2",
-            "x-client-version": "v3mobile-spa/2b5c480eb",
-        }
-        try:
-            logger.info("Refreshing tokens...")
-            response = requests.post(self.REFRESH_ENDPOINT, json=payload, headers=headers)
-            if response.status_code == 200:
-                data = response.json()
-                result = data.get("result", {})
-                if result:
-                    self.token_data["refreshToken"] = result.get("refreshToken", {})
-                    self.token_data["accessToken"] = result.get("accessToken", {})
-                    self.token_data["authToken"] = result.get("authToken")
-                    self.token_data["authKey"] = result.get("authKey")
-                    self.save_tokens()
-                    logger.info("Tokens refreshed successfully.")
-                    return True
+        
+        headers = HttpConfig.get_common_headers()
+        headers["content-type"] = "application/json"
+        
+        retries = 0
+        while retries < Config.MAX_RETRIES:
+            try:
+                logger.info("Refreshing tokens...")
+                response = requests.post(
+                    self.REFRESH_ENDPOINT, 
+                    json=payload, 
+                    headers=headers, 
+                    timeout=Config.REQUEST_TIMEOUT
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    result = data.get("result", {})
+                    if result:
+                        self.token_data["refreshToken"] = result.get("refreshToken", {})
+                        self.token_data["accessToken"] = result.get("accessToken", {})
+                        self.token_data["authToken"] = result.get("authToken")
+                        self.token_data["authKey"] = result.get("authKey")
+                        self.save_tokens()
+                        logger.info("Tokens refreshed successfully.")
+                        return True
+                    else:
+                        logger.error("No 'result' in refresh response: %s", data)
                 else:
-                    logger.error("No 'result' in refresh response: %s", data)
-            else:
-                logger.error("Refresh request failed with status code %d", response.status_code)
-        except Exception as e:
-            logger.error("Exception during token refresh: %s", e)
+                    logger.error("Refresh request failed with status code %d", response.status_code)
+                break
+            except RequestException as e:
+                retries += 1
+                logger.error("Error during token refresh (attempt %d/%d): %s", 
+                            retries, Config.MAX_RETRIES, e)
+                if retries >= Config.MAX_RETRIES:
+                    break
+                time.sleep(Config.RETRY_DELAY)
+        
         return False
 
     def get_access_token(self):

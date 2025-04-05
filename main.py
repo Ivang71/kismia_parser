@@ -1,9 +1,7 @@
 import logging
-from auth.auth_manager import AuthManager
-from fetcher.hids_fetcher import HidsFetcher
-from fetcher.profile_fetcher import ProfileFetcher
+from auth import AuthManager
+from fetcher import HidsFetcher, ProfileFetcher
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def main():
