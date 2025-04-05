@@ -41,8 +41,8 @@ class HidsFetcher(BaseFetcher):
                 hids_count_before = len(self.hids)
                 for hit in hits:
                     hid = hit.get("user", {}).get("hid")
-                    if hid and hid not in self.hids:
-                        self.hids.append(hid)
+                    if hid and not any(h.get("id") == hid for h in self.hids):
+                        self.hids.append({"id": hid, "processed": False})
                         
                 new_hids_added = len(self.hids) > hids_count_before
                 if new_hids_added:
