@@ -5,6 +5,7 @@ import logging
 import requests
 from requests.exceptions import RequestException
 import jwt
+import subprocess
 from utils import HttpConfig
 from config import Config
 
@@ -57,41 +58,65 @@ class AuthManager:
             logger.error("Missing tokens required for refresh")
             return False
 
-        payload = {
-            "refresh_token": self.token_data["refreshToken"].get("refresh_token"),
-            "access_token": self.token_data["accessToken"].get("access_token")
-        }
+        refresh_token = self.token_data["refreshToken"].get("refresh_token")
+        access_token = self.token_data["accessToken"].get("access_token")
         
-        headers = HttpConfig.get_common_headers()
-        headers["content-type"] = "application/json"
+        if not refresh_token or not access_token:
+            logger.error("Invalid token data for refresh")
+            return False
+        
+        auth_token = self.token_data.get("authToken", "")
+        
+        curl_command = (
+            f"curl '{self.refresh_endpoint}' "
+            "-H 'accept: application/json, text/plain, */*' "
+            "-H 'accept-language: en-US,en;q=0.9,ru;q=0.8' "
+            "-H 'cache-control: no-cache' "
+            "-H 'content-type: application/json' "
+            f"-b 'pauth={auth_token}' "
+            "-H 'dnt: 1' "
+            f"-H 'origin: {HttpConfig.BASE_URL}' "
+            "-H 'platform: mobile' "
+            "-H 'platform-version: 2' "
+            "-H 'pragma: no-cache' "
+            "-H 'priority: u=1, i' "
+            f"-H 'referer: {HttpConfig.BASE_URL}/matches' "
+            "-H 'sec-ch-ua: \"Google Chrome\";v=\"135\", \"Not-A.Brand\";v=\"8\", \"Chromium\";v=\"135\"' "
+            "-H 'sec-ch-ua-mobile: ?1' "
+            "-H 'sec-ch-ua-platform: \"Android\"' "
+            "-H 'sec-fetch-dest: empty' "
+            "-H 'sec-fetch-mode: cors' "
+            "-H 'sec-fetch-site: same-origin' "
+            "-H 'user-agent: Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36' "
+            "-H 'x-client-version: v3mobile-spa/2b5c480eb' "
+            f"--data-raw '{{\"refresh_token\":\"{refresh_token}\",\"access_token\":\"{access_token}\"}}'"
+        )
         
         for attempt in range(Config.MAX_RETRIES):
             try:
                 logger.info("Refreshing tokens...")
-                response = requests.post(
-                    self.refresh_endpoint, 
-                    json=payload, 
-                    headers=headers, 
-                    timeout=Config.REQUEST_TIMEOUT
-                )
+                result = subprocess.run(curl_command, shell=True, capture_output=True, text=True)
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    result = data.get("result", {})
-                    if result:
-                        self.token_data["refreshToken"] = result.get("refreshToken", {})
-                        self.token_data["accessToken"] = result.get("accessToken", {})
-                        self.token_data["authToken"] = result.get("authToken")
-                        self.token_data["authKey"] = result.get("authKey")
-                        self.save_tokens()
-                        logger.info("Tokens refreshed successfully")
-                        return True
-                    else:
-                        logger.error(f"No 'result' in refresh response: {data}")
+                if result.returncode == 0 and result.stdout:
+                    try:
+                        data = json.loads(result.stdout)
+                        result_data = data.get("result", {})
+                        if result_data:
+                            self.token_data["refreshToken"] = result_data.get("refreshToken", {})
+                            self.token_data["accessToken"] = result_data.get("accessToken", {})
+                            self.token_data["authToken"] = result_data.get("authToken")
+                            self.token_data["authKey"] = result_data.get("authKey")
+                            self.save_tokens()
+                            logger.info("Tokens refreshed successfully")
+                            return True
+                        else:
+                            logger.error(f"No 'result' in refresh response: {data}")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse refresh response: {e}")
                 else:
-                    logger.error(f"Refresh request failed with status code {response.status_code}")
+                    logger.error(f"Refresh request failed: {result.stderr}")
                 break
-            except RequestException as e:
+            except Exception as e:
                 logger.error(f"Error during token refresh (attempt {attempt+1}/{Config.MAX_RETRIES}): {e}")
                 if attempt < Config.MAX_RETRIES - 1:
                     time.sleep(Config.RETRY_DELAY)
