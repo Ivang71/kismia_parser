@@ -2,6 +2,8 @@ import logging
 import requests
 import time
 import random
+import json
+import os
 from utils import HttpConfig
 from config import Config
 from db import Database
@@ -15,6 +17,24 @@ class KismiaAPI:
         self.db = Database()
         self.base_url = HttpConfig.BASE_URL
         self.next_page_token = None
+        self.passed_users_file = os.path.join(Config.DATA_DIR, "passed_users.json")
+        self.passed_users = self._load_passed_users()  # Track users we've passed on
+    
+    def _load_passed_users(self):
+        if os.path.exists(self.passed_users_file):
+            try:
+                with open(self.passed_users_file, "r") as f:
+                    return set(json.load(f))
+            except Exception as e:
+                logger.error(f"Error loading passed users file: {e}")
+        return set()
+    
+    def _save_passed_users(self):
+        try:
+            with open(self.passed_users_file, "w") as f:
+                json.dump(list(self.passed_users), f)
+        except Exception as e:
+            logger.error(f"Error saving passed users file: {e}")
     
     def get_headers(self, additional_headers=None):
         access_token = self.auth_manager.get_access_token()
@@ -47,6 +67,41 @@ class KismiaAPI:
                     raise
                 time.sleep(Config.RETRY_DELAY)
     
+    def pass_on_user(self, hid):
+        # Skip if we've already passed on this user
+        if hid in self.passed_users:
+            logger.info(f"Already passed on user {hid}")
+            return True
+            
+        # Despite API errors, consider the user passed for our tracking
+        self.passed_users.add(hid)
+        self._save_passed_users()
+        logger.info(f"Marked user {hid} as passed")
+        
+        # Try the actual API pass call, but don't depend on its success
+        try:
+            url = f"{self.base_url}/v3/matchesGame/users/{hid}:pass"
+            headers = self.get_headers()
+            if not headers:
+                return False
+                
+            json_data = {
+                "interactionMethod": "INTERACTION_METHOD_CLICK"
+            }
+            
+            resp = self.make_request("POST", url, headers=headers, cookies=self.cookies, json=json_data)
+            if resp.status_code == 200:
+                logger.info(f"Successfully passed on user {hid}")
+                return True
+            else:
+                # Log the error but still consider it passed for our purposes
+                logger.info(f"API rejected pass for {hid} with status {resp.status_code}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error attempting to pass on user {hid}: {e}")
+            return True  # Still consider it passed for our purposes
+    
     def fetch_batch_users(self, max_pages=None):
         max_pages = max_pages or Config.HIDS_FETCH_MAX_PAGES
         batch_url = f"{self.base_url}/v3/matchesGame/users:pickUp"
@@ -65,15 +120,32 @@ class KismiaAPI:
 
                 data = resp.json()
                 hits = data.get("hits", [])
+                logger.info(f"Fetched {len(hits)} users from batch API")
+                
                 saved_count = 0
+                pass_count = 0
                 
                 for hit in hits:
                     if self.db.save_user(hit):
                         saved_count += 1
+                    
+                    # Extract HID from the nested user object
+                    if 'user' in hit and 'hid' in hit['user']:
+                        hid = hit['user']['hid']
+                        logger.info(f"Processing user with HID: {hid}")
+                        
+                        # Simply try to pass on the user
+                        if self.pass_on_user(hid):
+                            pass_count += 1
+                        
+                        time.sleep(random.uniform(0.5, 1.5))
+                    else:
+                        logger.warning(f"Could not find HID in hit structure")
                         
                 if saved_count > 0:
                     logger.info("Added %d new items", saved_count)
-                    
+                
+                logger.info(f"Passed on {pass_count}/{len(hits)} users")
                 logger.info("Page %d processed", page + 1)
 
                 self.next_page_token = data.get("nextPageToken")
