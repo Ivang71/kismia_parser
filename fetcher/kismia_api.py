@@ -69,7 +69,7 @@ class KismiaAPI:
                     raise
                 time.sleep(Config.RETRY_DELAY)
     
-    def pass_on_user(self, hid, tracking_data=None):
+    def pass_on_user(self, hid, tracking_data=None, operation_token=None):
         if hid in self.passed_users:
             logger.info(f"Already passed on user {hid}")
             return True
@@ -78,7 +78,7 @@ class KismiaAPI:
         self._save_json_set(self.passed_users, self.passed_users_file)
         
         try:
-            url = f"{self.base_url}/v3/matchesGame/users/{hid}:pass"
+            url = f"{self.base_url}/v3/matchesGame/users/{operation_token}:pass"
             headers = self.get_headers()
             if not headers:
                 return False
@@ -86,8 +86,7 @@ class KismiaAPI:
             json_data = {"interactionMethod": "INTERACTION_METHOD_CLICK"}
             if tracking_data:
                 json_data["trackingData"] = tracking_data
-                logger.debug(f"Using tracking data for pass: {tracking_data}")
-                
+            
             resp = self.make_request("POST", url, headers=headers, cookies=self.cookies, json=json_data)
             logger.debug(f"Pass response for {hid}: status={resp.status_code}, body={resp.text[:200]}")
             
@@ -101,13 +100,14 @@ class KismiaAPI:
             logger.error(f"Error attempting to pass on user {hid}: {e}")
             return True
     
-    def like_user(self, hid, tracking_data=None):
+    def like_user(self, hid, tracking_data=None, operation_token=None):
         if hid in self.liked_users:
             logger.info(f"Already liked user {hid}")
             return True
             
         try:
-            url = f"{self.base_url}/v3/matchesGame/users/{hid}:like"
+            url = f"{self.base_url}/v3/matchesGame/users/{operation_token}:like"
+            
             headers = self.get_headers({
                 "accept": "application/json, text/plain, */*",
                 "content-type": "application/json",
@@ -123,7 +123,6 @@ class KismiaAPI:
             json_data = {"interactionMethod": "INTERACTION_METHOD_CLICK"}
             if tracking_data:
                 json_data["trackingData"] = tracking_data
-                logger.debug(f"Using tracking data for like: {tracking_data}")
             
             resp = self.make_request("POST", url, headers=headers, cookies=self.cookies, json=json_data)
             logger.debug(f"Like response for {hid}: status={resp.status_code}, body={resp.text[:200]}")
@@ -172,21 +171,22 @@ class KismiaAPI:
                     if 'user' in hit and 'hid' in hit['user']:
                         hid = hit['user']['hid']
                         tracking_data = hit.get('trackingData')
+                        operation_token = hit.get('operationToken')
                         
                         if hid in self.liked_users or hid in self.passed_users:
                             stats["skipped"] += 1
                             continue
                         
                         if random.random() < like_prob:
-                            if self.like_user(hid, tracking_data):
+                            if self.like_user(hid, tracking_data, operation_token):
                                 stats["liked"] += 1
                         else:
-                            if self.pass_on_user(hid, tracking_data):
+                            if self.pass_on_user(hid, tracking_data, operation_token):
                                 stats["passed"] += 1
                         
                         time.sleep(random.uniform(0.5, 1.5))
                     
-                logger.info(f"Added {stats['saved']} new items")
+                logger.info(f"\033[92mAdded {stats['saved']} new items\033[0m")
                 logger.info(f"Liked {stats['liked']}, passed on {stats['passed']}, skipped {stats['skipped']} out of {len(hits)} users")
                 logger.info(f"Page {page + 1} processed")
 
