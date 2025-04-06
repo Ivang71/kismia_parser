@@ -4,19 +4,22 @@ from auth import AuthManager
 from fetcher import KismiaAPI
 from db import Database
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 def main():
     auth_manager = AuthManager()
     db = Database()
-    
-    kismia_api = KismiaAPI(auth_manager)
+    api = KismiaAPI(auth_manager)
     
     logger.info(f"Starting with {db.count_users()} users in database")
     logger.info(f"Users with profiles: {db.count_users_with_profile()}")
     
-    batch_thread = threading.Thread(target=kismia_api.fetch_batch_users, daemon=True)
-    profile_thread = threading.Thread(target=kismia_api.continuous_profile_fetch, daemon=True)
+    batch_thread = threading.Thread(target=api.fetch_batch_users, daemon=True)
+    profile_thread = threading.Thread(target=api.continuous_profile_fetch, daemon=True)
     
     logger.info("Starting user and profile fetching in parallel")
     batch_thread.start()
