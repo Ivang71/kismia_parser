@@ -18,6 +18,11 @@ class BatchFetcher(BaseFetcher):
 
     def fetch(self):
         for page in range(self.max_pages):
+            # Reset page token every 10 pages
+            if page > 0 and page % 10 == 0:
+                self.next_page_token = None
+                logger.info("Resetting page token at page %d", page)
+                
             headers = self.get_headers({"x-client-data": "XbPVwbt9ro651,n2rVn1tyD069k,DJK6pat0XpVPn,J70RlrtM2GVlB"})
             if not headers:
                 break
