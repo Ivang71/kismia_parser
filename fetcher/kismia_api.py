@@ -19,6 +19,9 @@ class KismiaAPI:
         self.next_page_token = None
         self.passed_users_file = os.path.join(Config.DATA_DIR, "passed_users.json")
         self.passed_users = self._load_passed_users()  # Track users we've passed on
+        self.liked_users_file = os.path.join(Config.DATA_DIR, "liked_users.json")
+        self.liked_users = self._load_liked_users()  # Track users we've liked
+        self.like_probability = 0.5  # Default like probability
     
     def _load_passed_users(self):
         if os.path.exists(self.passed_users_file):
@@ -35,6 +38,22 @@ class KismiaAPI:
                 json.dump(list(self.passed_users), f)
         except Exception as e:
             logger.error(f"Error saving passed users file: {e}")
+    
+    def _load_liked_users(self):
+        if os.path.exists(self.liked_users_file):
+            try:
+                with open(self.liked_users_file, "r") as f:
+                    return set(json.load(f))
+            except Exception as e:
+                logger.error(f"Error loading liked users file: {e}")
+        return set()
+    
+    def _save_liked_users(self):
+        try:
+            with open(self.liked_users_file, "w") as f:
+                json.dump(list(self.liked_users), f)
+        except Exception as e:
+            logger.error(f"Error saving liked users file: {e}")
     
     def get_headers(self, additional_headers=None):
         access_token = self.auth_manager.get_access_token()
@@ -102,8 +121,56 @@ class KismiaAPI:
             logger.error(f"Error attempting to pass on user {hid}: {e}")
             return True  # Still consider it passed for our purposes
     
-    def fetch_batch_users(self, max_pages=None):
+    def like_user(self, hid):
+        # Skip if we've already liked this user
+        if hid in self.liked_users:
+            logger.info(f"Already liked user {hid}")
+            return True
+            
+        try:
+            url = f"{self.base_url}/v3/matchesGame/users/{hid}:like"
+            
+            headers = self.get_headers({
+                "accept": "application/json, text/plain, */*",
+                "content-type": "application/json",
+                "platform": "desktop",
+                "platform-version": "2",
+                "x-client-version": "desktop-spa/69b81e654",
+                "priority": "u=1, i"
+            })
+            
+            if not headers:
+                return False
+            
+            # Use the known working tracking data from the curl example
+            tracking_data = "ZmFsc2UtMC45OTU0ODg0ODM4NTE3NTE4LTE3NDM5MjE1OTItNDg="
+            
+            json_data = {
+                "trackingData": tracking_data,
+                "interactionMethod": "INTERACTION_METHOD_CLICK"
+            }
+            
+            resp = self.make_request("POST", url, headers=headers, cookies=self.cookies, json=json_data)
+            
+            # For the purpose of our app, both 200 and 400 are considered successful
+            # The API often returns 400 but the like is actually registered
+            if resp.status_code in [200, 400]:
+                self.liked_users.add(hid)
+                self._save_liked_users()
+                log_level = logger.info if resp.status_code == 200 else logger.warning
+                log_level(f"{'Successfully liked' if resp.status_code == 200 else 'Like request sent to'} user {hid}")
+                return True
+            else:
+                logger.error(f"API rejected like for {hid} with status {resp.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error attempting to like user {hid}: {e}")
+            return False
+    
+    def fetch_batch_users(self, max_pages=None, like_probability=None):
         max_pages = max_pages or Config.HIDS_FETCH_MAX_PAGES
+        like_prob = like_probability if like_probability is not None else self.like_probability
         batch_url = f"{self.base_url}/v3/matchesGame/users:pickUp"
         
         for page in range(max_pages):
@@ -124,6 +191,8 @@ class KismiaAPI:
                 
                 saved_count = 0
                 pass_count = 0
+                like_count = 0
+                skipped_count = 0
                 
                 for hit in hits:
                     if self.db.save_user(hit):
@@ -134,9 +203,19 @@ class KismiaAPI:
                         hid = hit['user']['hid']
                         logger.info(f"Processing user with HID: {hid}")
                         
-                        # Simply try to pass on the user
-                        if self.pass_on_user(hid):
-                            pass_count += 1
+                        # Skip if already liked or passed
+                        if hid in self.liked_users or hid in self.passed_users:
+                            logger.info(f"Skipping user {hid} - already processed")
+                            skipped_count += 1
+                            continue
+                        
+                        # Randomly decide to like or pass
+                        if random.random() < like_prob:
+                            if self.like_user(hid):
+                                like_count += 1
+                        else:
+                            if self.pass_on_user(hid):
+                                pass_count += 1
                         
                         time.sleep(random.uniform(0.5, 1.5))
                     else:
@@ -145,7 +224,7 @@ class KismiaAPI:
                 if saved_count > 0:
                     logger.info("Added %d new items", saved_count)
                 
-                logger.info(f"Passed on {pass_count}/{len(hits)} users")
+                logger.info(f"Liked {like_count}, passed on {pass_count}, skipped {skipped_count} out of {len(hits)} users")
                 logger.info("Page %d processed", page + 1)
 
                 self.next_page_token = data.get("nextPageToken")
