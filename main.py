@@ -18,15 +18,15 @@ def main():
     logger.info(f"Starting with {db.count_users()} users in database")
     logger.info(f"Users with profiles: {db.count_users_with_profile()}")
     
-    batch_thread = threading.Thread(target=api.fetch_batch_users, daemon=True)
+    # batch_thread = threading.Thread(target=api.fetch_batch_users, daemon=True)
     profile_thread = threading.Thread(target=api.continuous_profile_fetch, daemon=True)
-    
-    logger.info("Starting user and profile fetching in parallel")
-    batch_thread.start()
+
+    # batch_thread.start()
     profile_thread.start()
     
     try:
-        batch_thread.join()
+        # batch_thread.join() only one at a time
+        profile_thread.join()
     except KeyboardInterrupt:
         logger.info("Process interrupted by user")
 
